@@ -6,11 +6,10 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/opencv.hpp>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <random>
 #include <time.h>
 #include <algorithm>
+#include "util.h"
 
 using namespace std;
 using namespace cv;
@@ -28,16 +27,6 @@ struct WiderDataDesc{
     int boxCount;
     vector<Rect> boxs;
 };
-
-int createDir(const   char   *sPathName)
-{
-    if(access(sPathName,NULL)!=0){
-        if(mkdir(sPathName,0755)==-1){
-            return -1;
-        }
-    }
-    return 0;
-}
 
 int createGenDirs(){
     int result=0;
@@ -108,24 +97,18 @@ void showImage(Mat& image,Rect rect){
     waitKey(0);
 }
 
-void saveImage(Mat& image,Rect roi,const string& path){
+bool saveImage(Mat& image,Rect roi,const string& path){
     cout<<"saving file :"<<path<<endl;
     try{
-    Mat imageRoi=image(roi).clone();
-    Mat dest;
-    resize(imageRoi,dest,Size(12,12));
-    imwrite(path,dest);
+        Mat imageRoi=image(roi).clone();
+        Mat dest;
+        resize(imageRoi,dest,Size(12,12));
+        imwrite(path,dest);
+        return true;
     }catch(cv::Exception e){
-        cout<<"the roi is"<<roi.x <<" "<<roi.y
-           <<" "<<roi.width<<" "<<roi.height<<endl;
+        cout<<"save image failed:"<<roi.x<<" "<<roi.y<<" "<<roi.width<<" "<<roi.height<<endl;
     }
-}
-
-float IoU(Rect& rect1,Rect& rect2){
-    Rect inRect=rect1 & rect2;
-    Rect outRect=rect1 | rect2;
-    float iou=(float)inRect.area()/(float)outRect.area();
-    return iou;
+    return false;
 }
 
 bool isNegativeRect(Rect& rect,vector<Rect>& boxs){
@@ -186,10 +169,11 @@ int main(int argc,char** argv){
             negRect.y=dist(random);
             if(isNegativeRect(negRect,dataDesc.boxs)){
                 string path=string(GEN_NEG_DIR)+"/"+to_string(negIndex)+".jpg";
-                saveImage(image,negRect,path);
-                negStream<<path<<endl;
-                negIndex++;
-                negNumber++;
+                if(saveImage(image,negRect,path)){
+                    negStream<<path<<endl;
+                    negIndex++;
+                    negNumber++;
+                }
             }
         }
         //generate positive image
@@ -214,20 +198,23 @@ int main(int argc,char** argv){
                 negRect.height=box.height;
                 if (negRect.x+negRect.width > width || negRect.y+negRect.height>height)
                     continue;
-                if(isNegativeRect(negRect,dataDesc.boxs)){
+                if(isNegativeRect(negRect,dataDesc.boxs)&&negRect.x>=0
+                    &&negRect.y>=0&&negRect.x+negRect.width<=width
+                    &&negRect.y+negRect.height<=height){
                     string path=string(GEN_NEG_DIR)+"/"+to_string(negIndex)+".jpg";
-                    saveImage(image,negRect,path);
-                    negStream<<path<<endl;
-                    negIndex++;
-                    negNumber++;
+                    if(saveImage(image,negRect,path)){
+                        negStream<<path<<endl;
+                        negIndex++;
+                        negNumber++;
+                    }
                 }
             }
             //try 20 times to generate positive and part image
             uniform_int_distribution<int> posSizeDist((int)std::min(box.width,box.height)*0.8,
-                                                      std::ceil(max(box.width,box.height)*1.25));
+                                                      std::ceil(std::max(box.width,box.height)*1.25));
             uniform_int_distribution<int> posXDist(-box.width*0.2,box.width*0.2);
             uniform_int_distribution<int> posYDist(-box.height*0.2,box.height*0.2);
-            for(int i=0;i<20;i++){
+            for(int i=0;i<25;i++){
                 int size=posSizeDist(random);
                 int deltaX=posXDist(random);
                 int deltaY=posYDist(random);
